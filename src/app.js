@@ -1,15 +1,13 @@
 import { pathToFileURL } from "node:url";
-import { classics } from "./classics.js";
+import { getRecommendation } from "./recommendation.js";
+
+export { getRecommendation } from "./recommendation.js";
 
 export function getAppStatus() {
   return {
     status: "READY",
     purpose: "유명한 고전의 한 문단을 추천하고 짤막한 인생의 위트를 전한다.",
   };
-}
-
-export function getRecommendation(random = Math.random) {
-  return classics[Math.floor(random() * classics.length)];
 }
 
 export function runApp() {
