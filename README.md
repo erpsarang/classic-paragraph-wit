@@ -7,7 +7,7 @@
 ## Framework baseline
 
 - canonical: `erpsarang/self-improvement-mvp`
-- source SHA: `91864ad5934877eeb1c4cec127f167cb8c5d9932`
+- source SHA: `b2541b57c5de4185f1abe2783dcc875c5dff7f0c`
 - final merge: Human-only
 - Auto Merge: 사용하지 않음
 
