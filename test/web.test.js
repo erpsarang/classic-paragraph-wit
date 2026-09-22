@@ -9,15 +9,41 @@ import { initWeb } from "../src/web.js";
 const fieldIds = ["classic-title", "classic-author", "classic-paragraph", "classic-wit"];
 
 function createDocument() {
-  const elements = new Map();
-  for (const id of [...fieldIds, "next-recommendation"]) {
+  function createElement(tagName) {
     const listeners = new Map();
-    elements.set(id, {
+    const attributes = new Map();
+    return {
+      tagName: tagName.toUpperCase(),
+      id: "",
       textContent: "",
       lang: "",
-      disabled: id === "next-recommendation",
+      href: "",
+      disabled: false,
+      children: [],
+      parentElement: null,
       set innerHTML(value) {
         assert.fail("Recommendation content must be assigned as text");
+      },
+      setAttribute(name, value) {
+        attributes.set(name, String(value));
+      },
+      getAttribute(name) {
+        return attributes.get(name) ?? null;
+      },
+      append(...children) {
+        for (const child of children) {
+          child.parentElement = this;
+          this.children.push(child);
+        }
+      },
+      insertAdjacentElement(position, element) {
+        assert.ok(this.parentElement);
+        assert.ok(["beforebegin", "afterend"].includes(position));
+        const siblings = this.parentElement.children;
+        const index = siblings.indexOf(this);
+        element.parentElement = this.parentElement;
+        siblings.splice(index + (position === "afterend" ? 1 : 0), 0, element);
+        return element;
       },
       addEventListener(type, callback) {
         listeners.set(type, callback);
@@ -25,9 +51,31 @@ function createDocument() {
       click() {
         if (!this.disabled) listeners.get("click")?.();
       },
-    });
+    };
   }
-  return { getElementById: (id) => elements.get(id) };
+  const main = createElement("main");
+  const article = createElement("article");
+  article.id = "recommendation";
+  main.append(article);
+  for (const id of fieldIds) {
+    const element = createElement(id === "classic-paragraph" ? "blockquote" : "p");
+    element.id = id;
+    article.append(element);
+  }
+  const button = createElement("button");
+  button.id = "next-recommendation";
+  button.disabled = true;
+  main.append(button);
+
+  function findById(element, id) {
+    if (element.id === id) return element;
+    for (const child of element.children) {
+      const found = findById(child, id);
+      if (found) return found;
+    }
+    return null;
+  }
+  return { createElement, getElementById: (id) => findById(main, id) };
 }
 
 function assertRendered(document, classic) {
@@ -40,6 +88,8 @@ function assertRendered(document, classic) {
     assert.equal(document.getElementById(id).textContent, classic[key]);
   }
   assert.equal(document.getElementById("classic-paragraph").lang, classic.source.language);
+  assert.equal(document.getElementById("classic-source-location").textContent, classic.source.location);
+  assert.equal(document.getElementById("classic-source-link").href, classic.source.url);
 }
 
 test("shared recommendation preserves the original API and selection boundaries", () => {
@@ -87,6 +137,81 @@ test("initial render and repeated button clicks show complete, different recomme
   assert.equal(viewedIds.size, classics.length);
 });
 
+test("previous button is accessible and history navigation restores all fields without random draws", () => {
+  const document = createDocument();
+  let calls = 0;
+  initWeb(document, () => { calls += 1; return 0; });
+  const previous = document.getElementById("previous-recommendation");
+  const next = document.getElementById("next-recommendation");
+  assert.equal(previous.tagName, "BUTTON");
+  assert.equal(previous.type, "button");
+  assert.equal(previous.textContent, "이전 추천");
+  assert.equal(previous.getAttribute("aria-controls"), "recommendation");
+  assert.equal(previous.parentElement, next.parentElement);
+  const siblings = next.parentElement.children;
+  assert.equal(siblings[siblings.indexOf(next) + 1], previous);
+  assert.equal(previous.disabled, true);
+  previous.click();
+  assertRendered(document, classics[0]);
+  assert.equal(calls, 1);
+
+  next.click();
+  assertRendered(document, classics[1]);
+  assert.equal(previous.disabled, false);
+  assert.equal(calls, 2);
+  previous.click();
+  assertRendered(document, classics[0]);
+  assert.equal(previous.disabled, true);
+  previous.click();
+  assertRendered(document, classics[0]);
+  assert.equal(calls, 2);
+
+  // Clear every rendered field so restoration must assign each one again.
+  for (const id of [...fieldIds, "classic-source-location"]) {
+    document.getElementById(id).textContent = "stale";
+  }
+  document.getElementById("classic-paragraph").lang = "stale";
+  document.getElementById("classic-source-link").href = "stale";
+  next.click();
+  assertRendered(document, classics[1]);
+  assert.equal(previous.disabled, false);
+  assert.equal(calls, 2);
+  next.click();
+  assertRendered(document, classics[2]);
+  assert.equal(calls, 3);
+});
+
+test("reappearing works retain separate positions through backward and forward traversal", () => {
+  const document = createDocument();
+  let calls = 0;
+  initWeb(document, () => { calls += 1; return 0; });
+  const next = document.getElementById("next-recommendation");
+  const previous = document.getElementById("previous-recommendation");
+  const sequence = [...classics, classics[0], classics[1], classics[0]];
+  for (const expected of sequence.slice(1)) {
+    next.click();
+    assertRendered(document, expected);
+  }
+  assert.equal(calls, sequence.length);
+  for (let index = sequence.length - 2; index >= 0; index -= 1) {
+    previous.click();
+    assertRendered(document, sequence[index]);
+    assert.equal(previous.disabled, index === 0);
+    assert.equal(calls, sequence.length);
+  }
+  previous.click();
+  assertRendered(document, sequence[0]);
+  for (const expected of sequence.slice(1)) {
+    next.click();
+    assertRendered(document, expected);
+    assert.equal(previous.disabled, false);
+    assert.equal(calls, sequence.length);
+  }
+  next.click();
+  assertRendered(document, classics[1]);
+  assert.equal(calls, sequence.length + 1);
+});
+
 test("optional history prioritizes unread works without mutation and preserves candidate order", () => {
   const histories = [
     new Set(),
@@ -131,9 +256,28 @@ test("each visit has independent history including the initial recommendation", 
   assertRendered(second, classics[1]);
   assertRendered(first, classics[2]);
 
+  first.getElementById("previous-recommendation").click();
+  assertRendered(first, classics[1]);
+  second.getElementById("previous-recommendation").click();
+  assertRendered(second, classics[0]);
+  assert.equal(second.getElementById("previous-recommendation").disabled, true);
+  assert.equal(first.getElementById("previous-recommendation").disabled, false);
+  first.getElementById("next-recommendation").click();
+  assertRendered(first, classics[2]);
+  assertRendered(second, classics[0]);
+
   const revisit = createDocument();
-  initWeb(revisit, () => 0);
+  let calls = 0;
+  initWeb(revisit, () => { calls += 1; return 0; });
   assertRendered(revisit, classics[0]);
+  assert.equal(revisit.getElementById("previous-recommendation").disabled, true);
+  revisit.getElementById("previous-recommendation").click();
+  assert.equal(calls, 1);
+  revisit.getElementById("next-recommendation").click();
+  assertRendered(revisit, classics[1]);
+  assert.equal(calls, 2);
+  assertRendered(first, classics[2]);
+  assertRendered(second, classics[0]);
 });
 
 test("at least three unique works provide complete original-text source metadata and Korean wit", () => {

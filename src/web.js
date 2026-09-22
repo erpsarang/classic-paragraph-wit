@@ -8,6 +8,7 @@ export function initWeb(document, random = Math.random) {
   const button = document.getElementById("next-recommendation");
   let location;
   let link;
+  let previousButton;
   if (typeof document.createElement === "function") {
     const source = document.createElement("div");
     source.id = "classic-source";
@@ -18,12 +19,20 @@ export function initWeb(document, random = Math.random) {
     link.textContent = "영어 원문 읽기 · Project Gutenberg";
     source.append(location, link);
     paragraph.insertAdjacentElement("afterend", source);
+
+    previousButton = document.createElement("button");
+    previousButton.id = "previous-recommendation";
+    previousButton.type = "button";
+    previousButton.textContent = "이전 추천";
+    previousButton.setAttribute?.("aria-controls", "recommendation");
+    previousButton.disabled = true;
+    button.insertAdjacentElement("afterend", previousButton);
   }
   const viewedIds = new Set();
-  let previousId;
+  const history = [];
+  let currentIndex = -1;
 
-  function renderRecommendation() {
-    const recommendation = getRecommendation(random, previousId, viewedIds);
+  function renderRecommendation(recommendation) {
     title.textContent = recommendation.title;
     author.textContent = recommendation.author;
     paragraph.textContent = recommendation.paragraph;
@@ -33,12 +42,28 @@ export function initWeb(document, random = Math.random) {
       location.textContent = recommendation.source.location;
       link.href = recommendation.source.url;
     }
-    previousId = recommendation.id;
-    viewedIds.add(recommendation.id);
+    if (previousButton) previousButton.disabled = currentIndex <= 0;
   }
 
-  renderRecommendation();
-  button.addEventListener("click", renderRecommendation);
+  function nextRecommendation() {
+    if (currentIndex === history.length - 1) {
+      const recommendation = getRecommendation(random, history[currentIndex]?.id, viewedIds);
+      history.push(recommendation);
+      viewedIds.add(recommendation.id);
+    }
+    currentIndex += 1;
+    renderRecommendation(history[currentIndex]);
+  }
+
+  function previousRecommendation() {
+    if (currentIndex <= 0) return;
+    currentIndex -= 1;
+    renderRecommendation(history[currentIndex]);
+  }
+
+  nextRecommendation();
+  previousButton?.addEventListener("click", previousRecommendation);
+  button.addEventListener("click", nextRecommendation);
   button.disabled = false;
 }
 
