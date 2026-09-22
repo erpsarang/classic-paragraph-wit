@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="고전의 한 문단과 짤막한 인생의 위트를 만나보세요.">
+  <title>고전 한 문단, 인생 한 줄</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f7f3eb; color: #292820; font-family: system-ui, sans-serif; font-size: 1rem; line-height: 1.8; }
+    main { max-width: 44rem; margin: 0 auto; padding: 2rem 1rem 3rem; }
+    h1 { font-size: clamp(1.6rem, 6vw, 2.3rem); line-height: 1.35; }
+    header p { color: #575448; }
+    article { margin: 1.5rem 0; padding: clamp(1rem, 4vw, 2rem); background: #fffdf8; border: 1px solid #d9d2c3; border-radius: 1rem; overflow-wrap: anywhere; }
+    h2 { margin: 0; font-size: 1.5rem; line-height: 1.5; }
+    h3, .label { margin: 1.5rem 0 0.4rem; font-size: 0.95rem; font-weight: 700; color: #575448; }
+    .label:first-child { margin-top: 0; }
+    p { margin: 0.5rem 0 1rem; }
+    blockquote { margin: 0; font-family: Georgia, serif; font-size: 1.15rem; line-height: 1.9; }
+    #classic-wit { border-left: 3px solid #526844; padding-left: 1rem; }
+    button { width: 100%; min-height: 48px; padding: 0.85rem 1rem; border: 0; border-radius: 0.6rem; background: #344e36; color: white; font: inherit; font-weight: 700; cursor: pointer; }
+    button:hover { background: #263e28; }
+    button:focus-visible { outline: 3px solid #80501d; outline-offset: 4px; }
+    button:disabled { opacity: 0.6; cursor: wait; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>고전 한 문단, 인생 한 줄</h1>
+      <p>잠깐의 여유에 고전 한 문단과 짤막한 위트를 만나보세요.</p>
+    </header>
+    <article id="recommendation" aria-labelledby="classic-title" aria-live="polite" aria-atomic="true">
+      <p class="label">작품명</p>
+      <h2 id="classic-title">고전을 준비하고 있어요</h2>
+      <p class="label">저자</p>
+      <p id="classic-author"></p>
+      <h3>추천 문단</h3>
+      <blockquote id="classic-paragraph"></blockquote>
+      <h3>짤막한 인생의 위트</h3>
+      <p id="classic-wit"></p>
+    </article>
+    <button id="next-recommendation" type="button" aria-controls="recommendation" disabled>다른 고전 추천</button>
+    <noscript><p>추천을 보려면 브라우저 설정에서 JavaScript를 켜 주세요.</p></noscript>
+  </main>
+  <script type="module" src="./src/web.js"></script>
+</body>
+</html>
