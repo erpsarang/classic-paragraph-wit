@@ -6,16 +6,18 @@ export function initWeb(document, random = Math.random) {
   const paragraph = document.getElementById("classic-paragraph");
   const wit = document.getElementById("classic-wit");
   const button = document.getElementById("next-recommendation");
+  const viewedIds = new Set();
   let previousId;
 
   function renderRecommendation() {
-    const recommendation = getRecommendation(random, previousId);
+    const recommendation = getRecommendation(random, previousId, viewedIds);
     title.textContent = recommendation.title;
     author.textContent = recommendation.author;
     paragraph.textContent = recommendation.paragraph;
     paragraph.lang = recommendation.source.language;
     wit.textContent = recommendation.wit;
     previousId = recommendation.id;
+    viewedIds.add(recommendation.id);
   }
 
   renderRecommendation();

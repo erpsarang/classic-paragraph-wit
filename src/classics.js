@@ -28,5 +28,20 @@ export const classics = [
       jurisdiction: "대한민국",
       publicDomainBasis: "Charles Dickens died in 1870; original text copyright has expired. No translation is used."
     }
+  },
+  {
+    id: "alices-adventures-in-wonderland",
+    title: "Alice’s Adventures in Wonderland",
+    author: "Lewis Carroll",
+    paragraph: "Alice was beginning to get very tired of sitting by her sister on the bank, and of having nothing to do: once or twice she had peeped into the book her sister was reading, but it had no pictures or conversations in it, ‘and what is the use of a book,’ thought Alice ‘without pictures or conversations?’",
+    wit: "앨리스의 서평은 간단합니다. 그림도 대화도 없다니, 책이 독자와 낯을 너무 가리는군요.",
+    source: {
+      url: "https://www.gutenberg.org/ebooks/11",
+      edition: "1865 English original",
+      location: "Chapter I, Down the Rabbit-Hole, opening paragraph",
+      language: "en",
+      jurisdiction: "대한민국",
+      publicDomainBasis: "Lewis Carroll died in 1898; original text copyright has expired. No translation is used."
+    }
   }
 ];
