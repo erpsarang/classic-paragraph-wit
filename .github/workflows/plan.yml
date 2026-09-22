@@ -1,0 +1,243 @@
+name: Read-only AI PLAN
+
+on:
+  issues:
+    types: [opened, reopened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 업무 요구를 작성한 Issue 번호
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  plan:
+    if: >-
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) ||
+      (github.event_name == 'issues' &&
+       startsWith(github.event.issue.title, '[업무 요구]') &&
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association))
+    outputs:
+      identity: ${{ steps.input.outputs.identity }}
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
+      artifact_url: ${{ steps.upload.outputs.artifact-url }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+    env:
+      GH_TOKEN: ""
+      GITHUB_TOKEN: ""
+      GIT_OPTIONAL_LOCKS: "0"
+    steps:
+      - name: Framework checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          path: planner-control
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Framework dependencies
+        working-directory: planner-control
+        run: |
+          npm ci --ignore-scripts --prefix .framework-runtime
+          ln -sT .framework-runtime/node_modules node_modules
+
+      - name: Freeze user requirement and target SHA
+        id: input
+        uses: actions/github-script@v7
+        env:
+          ISSUE_NUMBER: ${{ github.event_name == 'issues' && github.event.issue.number || inputs.issue_number }}
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const { createHash } = require('node:crypto');
+            const raw = process.env.ISSUE_NUMBER;
+            if (!/^[1-9]\d*$/.test(raw) || !Number.isSafeInteger(Number(raw))) throw new Error('Invalid issue number');
+            const { data: issue } = await github.rest.issues.get({ ...context.repo, issue_number: Number(raw) });
+            if (issue.pull_request || !issue.body?.trim()) throw new Error('A requirement Issue with a body is required');
+            const { data: repo } = await github.rest.repos.get(context.repo);
+            const { data: commit } = await github.rest.repos.getCommit({ ...context.repo, ref: repo.default_branch });
+            const output = path.join(process.env.RUNNER_TEMP, 'ai-plan');
+            fs.mkdirSync(output);
+            fs.mkdirSync(path.join(process.env.RUNNER_TEMP, 'plan-neutral'));
+            fs.writeFileSync(path.join(output, 'requirement.md'), `${issue.title}\n\n${issue.body}`);
+            const identity = {
+              schemaVersion: 1,
+              requirement: {
+                issueNumber: issue.number,
+                digestAlgorithm: 'sha256',
+                digestEncoding: 'UTF-8 JSON.stringify([title, body])',
+                digest: createHash('sha256').update(JSON.stringify([issue.title, issue.body]), 'utf8').digest('hex'),
+              },
+              repository: `${context.repo.owner}/${context.repo.repo}`,
+              targetSha: commit.sha,
+              workflow: { runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT, sha: context.sha },
+              artifactName: `plan-issue-${issue.number}-${process.env.GITHUB_RUN_ID}-attempt-${process.env.GITHUB_RUN_ATTEMPT}`,
+            };
+            fs.writeFileSync(path.join(output, 'identity.json'), JSON.stringify(identity, null, 2));
+            core.setOutput('identity', JSON.stringify(identity));
+            core.setOutput('sha', commit.sha);
+
+      - name: Target checkout at frozen SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.input.outputs.sha }}
+          persist-credentials: false
+          path: plan-target
+
+      - name: Prepare bounded PLAN Context Pack
+        working-directory: planner-control
+        run: .framework-runtime/node_modules/.bin/tsx src/self-improvement/planner-handler.ts prepare
+        env:
+          PLAN_TARGET: ${{ github.workspace }}/plan-target
+          PLAN_OUTPUT: ${{ runner.temp }}/ai-plan
+          PLAN_REQUIREMENT: ${{ runner.temp }}/ai-plan/requirement.md
+          PLAN_REPOSITORY: ${{ github.repository }}
+          PLAN_SHA: ${{ steps.input.outputs.sha }}
+
+      - name: Remove repository checkouts before AI
+        run: |
+          rm -rf planner-control plan-target
+          test ! -e planner-control
+          test ! -e plan-target
+
+      - name: PLAN AI rerun 비용 상한 확인
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_RUN_ATTEMPT" -gt 2 ]; then
+            echo "AI Cost Guardrail: 동일 PLAN run의 AI 호출은 최대 2 attempts만 허용합니다." >&2
+            exit 1
+          fi
+
+      - name: Read-only bounded AI Planner
+        timeout-minutes: 3
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets[github.repository == 'erpsarang/self-improvement-mvp' && 'FRAMEWORK_CODEX_API_KEY' || 'APP_CODEX_API_KEY'] }}
+          allow-bots: true
+          permission-profile: ":read-only"
+          safety-strategy: drop-sudo
+          working-directory: ${{ runner.temp }}/plan-neutral
+          codex-home: ${{ runner.temp }}/plan-codex-home
+          prompt-file: ${{ runner.temp }}/ai-plan/prompt.md
+          output-schema-file: ${{ runner.temp }}/ai-plan/schema.json
+          output-file: ${{ runner.temp }}/ai-plan/raw-plan.json
+          effort: medium
+          codex-args: '["-c","project_doc_max_bytes=0"]'
+
+      - name: Fresh Framework checkout for trusted validation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          path: planner-control-validation
+
+      - name: Fresh Target checkout at frozen SHA for validation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.input.outputs.sha }}
+          persist-credentials: false
+          path: plan-target-validation
+
+      - name: Install Framework dependencies for validation
+        working-directory: planner-control-validation
+        run: |
+          npm ci --ignore-scripts --prefix .framework-runtime
+          ln -sT .framework-runtime/node_modules node_modules
+
+      - name: Validate bounded PLAN against fresh exact SHA
+        working-directory: planner-control-validation
+        run: .framework-runtime/node_modules/.bin/tsx src/self-improvement/planner-handler.ts artifact
+        env:
+          PLAN_TARGET: ${{ github.workspace }}/plan-target-validation
+          PLAN_OUTPUT: ${{ runner.temp }}/ai-plan
+
+      - name: Store PLAN only
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ fromJSON(steps.input.outputs.identity).artifactName }}
+          path: |
+            ${{ runner.temp }}/ai-plan/PLAN.json
+            ${{ runner.temp }}/ai-plan/PLAN.md
+            ${{ runner.temp }}/ai-plan/PLAN-context.json
+            ${{ runner.temp }}/ai-plan/identity.json
+          if-no-files-found: error
+
+  provenance:
+    needs: plan
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Bind uploaded PLAN to frozen provenance
+        id: provenance
+        uses: actions/github-script@v7
+        env:
+          PLAN_IDENTITY: ${{ needs.plan.outputs.identity }}
+          PLAN_ARTIFACT_ID: ${{ needs.plan.outputs.artifact_id }}
+          PLAN_ARTIFACT_DIGEST: ${{ needs.plan.outputs.artifact_digest }}
+          PLAN_ARTIFACT_URL: ${{ needs.plan.outputs.artifact_url }}
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const identity = JSON.parse(process.env.PLAN_IDENTITY);
+            const id = process.env.PLAN_ARTIFACT_ID;
+            const digest = process.env.PLAN_ARTIFACT_DIGEST;
+            if (!/^[1-9]\d*$/.test(id) || !/^[a-f0-9]{64}$/.test(digest)) throw new Error('Missing exact uploaded PLAN identity');
+            const provenance = {
+              ...identity,
+              kind: 'untrusted-plan-provenance',
+              artifact: { name: identity.artifactName, id, digestAlgorithm: 'sha256', digest, url: process.env.PLAN_ARTIFACT_URL },
+            };
+            const file = path.join(process.env.RUNNER_TEMP, 'PLAN-provenance.json');
+            fs.writeFileSync(file, JSON.stringify(provenance, null, 2));
+            core.setOutput('path', file);
+
+      - name: Store trusted provenance
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ fromJSON(needs.plan.outputs.identity).artifactName }}-provenance
+          path: ${{ steps.provenance.outputs.path }}
+          if-no-files-found: error
+
+      - name: Leave human-readable PLAN pointer on requirement Issue
+        uses: actions/github-script@v7
+        env:
+          PLAN_IDENTITY: ${{ needs.plan.outputs.identity }}
+          PLAN_ARTIFACT_ID: ${{ needs.plan.outputs.artifact_id }}
+          PLAN_ARTIFACT_DIGEST: ${{ needs.plan.outputs.artifact_digest }}
+          PLAN_ARTIFACT_URL: ${{ needs.plan.outputs.artifact_url }}
+          PROVENANCE_URL: ${{ steps.upload.outputs.artifact-url }}
+        with:
+          script: |
+            const identity = JSON.parse(process.env.PLAN_IDENTITY);
+            const body = [
+              '## PLAN (AI 제안 — 구현 승인 아님)',
+              `PLAN: [${identity.artifactName}](${process.env.PLAN_ARTIFACT_URL})`,
+              `Provenance: [PLAN-provenance.json](${process.env.PROVENANCE_URL})`,
+              `Repository: ${identity.repository}`,
+              `Frozen target SHA: \`${identity.targetSha}\``,
+              `Requirement title/body SHA-256: \`${identity.requirement.digest}\``,
+              `Workflow run: ${identity.workflow.runId} / attempt: ${identity.workflow.runAttempt}`,
+              `PLAN artifact ID: ${process.env.PLAN_ARTIFACT_ID}`,
+              `PLAN artifact SHA-256: \`${process.env.PLAN_ARTIFACT_DIGEST}\``,
+              '이 PLAN은 제한된 Context Pack만 보고 생성되었습니다. pointer는 확인용이며 승인 시 exact provenance를 다시 검증합니다.',
+              '### HumanStatus: PLAN',
+              '**현재 상황:** AI가 계획을 제안했습니다. 아직 구현 승인이 아닙니다.',
+              '**다음 행동:** 계획을 검토하고 구현 범위가 준비된 경우에만 승인 여부를 결정하세요.',
+            ].join('\n\n');
+            await github.rest.issues.createComment({ ...context.repo, issue_number: identity.requirement.issueNumber, body });
