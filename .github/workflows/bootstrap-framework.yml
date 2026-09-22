@@ -1,0 +1,184 @@
+name: Bootstrap canonical Framework
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    if: github.event.head_commit.message == 'chore: bootstrap runner'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target App
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout canonical Framework exact SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --no-checkout https://github.com/erpsarang/self-improvement-mvp.git /tmp/framework-source
+          git -C /tmp/framework-source checkout --detach 611a28c7f1c8786d0c9091f18c4f8ed622c1ab5c
+          test "$(git -C /tmp/framework-source rev-parse HEAD)" = "611a28c7f1c8786d0c9091f18c4f8ed622c1ab5c"
+
+      - name: Copy canonical ownership exactly
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+
+          const sourceRoot = '/tmp/framework-source';
+          const ownership = JSON.parse(
+            fs.readFileSync(path.join(sourceRoot, 'policy/framework-distribution-ownership.v1.json'), 'utf8')
+          );
+          if (ownership.sourceRepository !== 'erpsarang/self-improvement-mvp') {
+            throw new Error('Unexpected canonical source repository');
+          }
+          if (!Array.isArray(ownership.entries) || ownership.entries.length !== 70) {
+            throw new Error('Expected exactly 70 Framework ownership entries');
+          }
+
+          for (const entry of ownership.entries) {
+            const src = path.join(sourceRoot, entry.sourcePath);
+            const dst = path.join(process.cwd(), entry.targetPath);
+            fs.mkdirSync(path.dirname(dst), { recursive: true });
+            fs.copyFileSync(src, dst);
+          }
+
+          fs.writeFileSync('README.md', `# classic-paragraph-wit
+
+유명한 고전의 한 문단을 추천하고, 그 문단에서 이어지는 짤막한 인생의 위트를 전하는 App입니다.
+
+현재는 **Framework bootstrap baseline**만 준비되어 있습니다. 실제 추천 기능은 첫 Requirement부터 AI Development Framework를 통해 구현합니다.
+
+## Framework baseline
+
+- canonical: \`erpsarang/self-improvement-mvp\`
+- source SHA: \`611a28c7f1c8786d0c9091f18c4f8ed622c1ab5c\`
+- final merge: Human-only
+- Auto Merge: 사용하지 않음
+
+## App baseline
+
+\`\`\`bash
+npm test
+npm run build
+\`\`\`
+`);
+
+          fs.writeFileSync('package.json', JSON.stringify({
+            name: 'classic-paragraph-wit',
+            version: '0.0.0',
+            private: true,
+            type: 'module',
+            scripts: {
+              test: 'node --test',
+              build: 'node --check src/app.js'
+            }
+          }, null, 2) + '\n');
+
+          fs.writeFileSync('package-lock.json', JSON.stringify({
+            name: 'classic-paragraph-wit',
+            version: '0.0.0',
+            lockfileVersion: 3,
+            requires: true,
+            packages: {
+              '': {
+                name: 'classic-paragraph-wit',
+                version: '0.0.0'
+              }
+            }
+          }, null, 2) + '\n');
+
+          fs.mkdirSync('src', { recursive: true });
+          fs.writeFileSync('src/app.js', `export function getAppStatus() {
+            return {
+              status: "READY",
+              purpose: "유명한 고전의 한 문단을 추천하고 짤막한 인생의 위트를 전한다.",
+            };
+          }
+          `);
+
+          fs.mkdirSync('test', { recursive: true });
+          fs.writeFileSync('test/app.test.js', `import test from "node:test";
+          import assert from "node:assert/strict";
+
+          import { getAppStatus } from "../src/app.js";
+
+          test("baseline app is ready for the first Requirement", () => {
+            const result = getAppStatus();
+            assert.equal(result.status, "READY");
+            assert.match(result.purpose, /고전/);
+          });
+          `);
+          NODE
+
+      - name: Verify 70/70 exact canonical bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const crypto = require('crypto');
+
+          const sourceRoot = '/tmp/framework-source';
+          const ownership = JSON.parse(
+            fs.readFileSync(path.join(sourceRoot, 'policy/framework-distribution-ownership.v1.json'), 'utf8')
+          );
+          const digest = p => crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+
+          const mismatches = [];
+          for (const entry of ownership.entries) {
+            const src = path.join(sourceRoot, entry.sourcePath);
+            const dst = path.join(process.cwd(), entry.targetPath);
+            if (!fs.existsSync(dst) || digest(src) !== digest(dst)) {
+              mismatches.push(entry.targetPath);
+            }
+          }
+          if (mismatches.length) {
+            throw new Error('Framework exact-copy mismatch: ' + mismatches.join(', '));
+          }
+          console.log(`Framework exact match: ${ownership.entries.length}/${ownership.entries.length}`);
+          NODE
+
+      - name: Verify App baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm test
+          npm run build
+
+      - name: Ensure App / Framework ownership do not collide
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const ownership = JSON.parse(
+            fs.readFileSync('/tmp/framework-source/policy/framework-distribution-ownership.v1.json', 'utf8')
+          );
+          const frameworkTargets = new Set(ownership.entries.map(e => e.targetPath));
+          const appFiles = ['README.md', 'package.json', 'package-lock.json', 'src/app.js', 'test/app.test.js'];
+          const collisions = appFiles.filter(p => frameworkTargets.has(p));
+          if (collisions.length) throw new Error('App/Framework collision: ' + collisions.join(', '));
+          console.log('App/Framework collision: 0');
+          NODE
+
+      - name: Remove one-time bootstrap runner and commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/bootstrap-framework.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: bootstrap Framework and App baseline"
+          git push origin HEAD:main
