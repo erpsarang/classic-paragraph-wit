@@ -1,0 +1,10 @@
+{
+  "name": "classic-paragraph-wit",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "build": "node --check src/app.js"
+  }
+}
