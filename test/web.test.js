@@ -69,12 +69,93 @@ test("initial render and repeated button clicks show complete, different recomme
   assertRendered(document, classics[0]);
   const button = document.getElementById("next-recommendation");
   assert.equal(button.disabled, false);
+  const viewedIds = new Set([classics[0].id]);
   let previous = classics[0];
-  for (let index = 0; index < 4; index += 1) {
+  for (let index = 0; index < classics.length * 3; index += 1) {
+    const expected = viewedIds.size < classics.length
+      ? classics.find((classic) => !viewedIds.has(classic.id))
+      : classics.find((classic) => classic.id !== previous.id);
     button.click();
-    const expected = classics.find((classic) => classic.id !== previous.id);
     assertRendered(document, expected);
+    assert.notEqual(expected.id, previous.id);
+    if (index < classics.length - 1) {
+      assert.equal(viewedIds.has(expected.id), false);
+    }
+    viewedIds.add(expected.id);
     previous = expected;
+  }
+  assert.equal(viewedIds.size, classics.length);
+});
+
+test("optional history prioritizes unread works without mutation and preserves candidate order", () => {
+  const histories = [
+    new Set(),
+    new Set(["unknown-id"]),
+    new Set([classics[0].id]),
+    new Set(classics.slice(0, -1).map((classic) => classic.id)),
+    new Set(classics.map((classic) => classic.id)),
+  ];
+  for (const previousId of [undefined, "unknown-id", ...classics.map((classic) => classic.id)]) {
+    for (const viewedIds of histories) {
+      const before = [...viewedIds];
+      const alternatives = classics.filter((classic) => classic.id !== previousId);
+      const unread = alternatives.filter((classic) => !viewedIds.has(classic.id));
+      const expected = unread.length > 0 ? unread : alternatives;
+      for (let index = 0; index < expected.length; index += 1) {
+        for (const value of [index / expected.length, (index + 1) / expected.length - Number.EPSILON]) {
+          let calls = 0;
+          const selected = getRecommendation(() => { calls += 1; return value; }, previousId, viewedIds);
+          assert.equal(selected, expected[index]);
+          assert.equal(calls, 1);
+          assert.deepEqual([...viewedIds], before);
+        }
+      }
+    }
+  }
+});
+
+test("each visit has independent history including the initial recommendation", () => {
+  const first = createDocument();
+  initWeb(first, () => 0);
+  assertRendered(first, classics[0]);
+  first.getElementById("next-recommendation").click();
+  assertRendered(first, classics[1]);
+
+  const second = createDocument();
+  initWeb(second, () => 0);
+  assertRendered(second, classics[0]);
+  first.getElementById("next-recommendation").click();
+  assertRendered(first, classics[2]);
+  assertRendered(second, classics[0]);
+  second.getElementById("next-recommendation").click();
+  assertRendered(second, classics[1]);
+  assertRendered(first, classics[2]);
+
+  const revisit = createDocument();
+  initWeb(revisit, () => 0);
+  assertRendered(revisit, classics[0]);
+});
+
+test("at least three unique works provide complete original-text source metadata and Korean wit", () => {
+  assert.ok(classics.length >= 3);
+  assert.equal(new Set(classics.map((classic) => classic.id)).size, classics.length);
+  assert.equal(new Set(classics.map((classic) => classic.paragraph)).size, classics.length);
+  assert.equal(new Set(classics.map((classic) => classic.wit)).size, classics.length);
+  for (const classic of classics) {
+    for (const key of ["id", "title", "author", "paragraph", "wit"]) {
+      assert.equal(typeof classic[key], "string");
+      assert.ok(classic[key].trim().length > 0);
+    }
+    assert.match(classic.wit, /[가-힣]/);
+    for (const key of ["url", "edition", "location", "language", "jurisdiction", "publicDomainBasis"]) {
+      assert.equal(typeof classic.source[key], "string");
+      assert.ok(classic.source[key].trim().length > 0);
+    }
+    assert.equal(new URL(classic.source.url).protocol, "https:");
+    assert.equal(classic.source.language, "en");
+    assert.equal(classic.source.jurisdiction, "대한민국");
+    assert.match(classic.source.publicDomainBasis, /original text copyright has expired/);
+    assert.match(classic.source.publicDomainBasis, /No translation is used/);
   }
 });
 
